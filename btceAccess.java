@@ -1,7 +1,7 @@
 package com.roteware.btcetrader;
 
 /**
- * API wrapper class for BTCE.com api v2
+ * API wrapper class for BTCE.com api v2 with convenience methods for api v3
  * 
  * @author Stbot
  */
@@ -10,7 +10,6 @@ import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
@@ -18,7 +17,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Scanner;
+import java.util.Properties;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -73,23 +72,22 @@ public class btceAccess {
 	
 	
 	/**
-	 * constructor useing a file to set the key and secret
+	 * constructor using a file to set the key and secret
 	 * 
 	 * @param configname  the name of the configuration file containing a key and secret combination
 	 * 			currently they should be separated by a line containing anything.
-	 * TODO This should run a .properties
 	 * 
 	 * @throws FileNotFoundException
 	 */
-	public btceAccess(String configname) throws FileNotFoundException {
-		InputStream input = new FileInputStream(configname);
-		Scanner scan = new Scanner(input);
-		scan.nextLine();
-		this.apiKey = scan.nextLine();
-		scan.nextLine();
-		this.apiSecret = scan.nextLine();
-		scan.close();
+	public btceAccess(String configname) throws IOException {
+		Properties prop = new Properties();
+		prop.load(new FileInputStream(configname));
+		
+		this.apiKey = prop.getProperty("key");
+		this.apiSecret = prop.getProperty("secret");
 		this.nonce = (System.currentTimeMillis() / 1000);
+		
+
 	}
 
 	/**
@@ -119,7 +117,8 @@ public class btceAccess {
 
 		params.put("method", request); // Add the method to the post data.
 		params.put("nonce", "" + nonce++); // incremented nonce added
-
+		
+		//iterate our params and format them for POST
 		for (Iterator<Entry<String, String>> argumentIterator = params
 				.entrySet().iterator(); argumentIterator.hasNext();) {
 			Map.Entry argument = argumentIterator.next();
@@ -129,11 +128,14 @@ public class btceAccess {
 			}
 			postBody += argument.getKey() + "=" + argument.getValue();
 		}
+		
+		//build mac from apiSecretKey 
 		SecretKeySpec keySpec = new SecretKeySpec(apiSecret.getBytes("UTF-8"),
 				"HmacSHA512");
 		Mac mac = Mac.getInstance("HmacSHA512");
 		mac.init(keySpec);
-
+		
+		//Open HTTP client add paramas and key to headers encrypted and POST
 		CloseableHttpClient client = HttpClientBuilder.create().build();
 		HttpPost post = new HttpPost("https://btc-e.com/tapi");
 		post.setHeader("Content-type", "application/x-www-form-urlencoded");
@@ -144,20 +146,20 @@ public class btceAccess {
 		post.setEntity(finalData);
 		CloseableHttpResponse answer = client.execute(post);
 
-		// System.out.println(answer.getEntity().getContent());
-
+		//Read response and build a string to send to JSON tokener
 		BufferedReader reader = new BufferedReader(new InputStreamReader(answer
 				.getEntity().getContent(), "UTF-8"));
 		StringBuilder builder = new StringBuilder();
 		for (String line = null; (line = reader.readLine()) != null;) {
 			builder.append(line).append("\n");
 		}
-
-		// System.out.println(builder.toString());
+		
+		//tokenise our response string and build a Json Object with it
 		JSONTokener tokener = new JSONTokener(builder.toString());
 		JSONObject finalResult = new JSONObject(tokener);
-		System.out.println(finalResult);
-
+		//System.out.println(finalResult);
+		
+		//return our JSON Object
 		return finalResult;
 
 	}
@@ -176,26 +178,172 @@ public class btceAccess {
 	 * @throws ClientProtocolException
 	 * @throws IOException
 	 */
-	public JSONObject publicInfoRequest(String currency, String method)
+	public JSONObject publicInfoRequest(String currency, String method,int version)
 			throws ClientProtocolException, IOException {
+		//Open HTTP Client and perform GET request from BTCE
 		CloseableHttpClient client = HttpClientBuilder.create().build();
-		HttpGet get = new HttpGet("http://btc-e.com/api/2/" + currency + "/"
-				+ method);
+		HttpGet get = null;
+		if(version==3){
+			get = new HttpGet("http://btc-e.com/api/3/" + method + "/"
+						+ currency);
+		}else{
+			 get = new HttpGet("http://btc-e.com/api/2/" + currency + "/"
+					+ method);
+		}
+		
 		CloseableHttpResponse response = client.execute(get);
-
+		
+		//Read the response into a String for the Tokener
 		BufferedReader reader = new BufferedReader(new InputStreamReader(
 				response.getEntity().getContent(), "UTF-8"));
 		StringBuilder builder = new StringBuilder();
 		for (String line = null; (line = reader.readLine()) != null;) {
 			builder.append(line).append("\n");
-			System.out.println(builder.toString());
+			//System.out.println(builder.toString());
 		}
-
+		
+		//Tokenise and Construct a JSON Object
 		JSONTokener tokener = new JSONTokener(builder.toString());
 		JSONObject finalResult = new JSONObject(tokener);
-
+		
+		//return JSON Object
 		return finalResult;
 
 	}
+	
+	/*
+	 * methods for accountInfoRequest
+	 * getInfo
+	 * TransHistory
+	 * TradeHistory
+	 * ActiveOrders
+	 * Trade
+	 * Cancel Order
+	 * 
+	 */
 
-}
+	/**
+	 * 
+	 * Convince Method to do a public ticker request (API 2)
+	 * 
+	 * @param currency String of currency pair to be queried 
+	 * @return JsonObject response of the request
+	 * @throws ClientProtocolException
+	 * @throws IOException
+	 */
+	public JSONObject tickerRequest(String currency) throws ClientProtocolException, IOException{
+		return publicInfoRequest(currency, "Ticker", 2);
+		
+	}
+	/**
+	 * Convince Method to do a public trades request (API 2)
+	 * 
+	 * @param currency String of currency pair to be queried 
+	 * @return JsonObject response of the request
+	 * @throws ClientProtocolException
+	 * @throws IOException
+	 */
+	public JSONObject tradesRequest(String currency) throws ClientProtocolException, IOException{
+		return publicInfoRequest(currency, "Trades",2);
+		
+	}
+	/**
+	 * 
+	 * Convince Method to do a public depth request (API 2)
+	 * 
+	 * @param currency String of currency pair to be queried 
+	 * @return JsonObject response of the request
+	 * @throws ClientProtocolException
+	 * @throws IOException
+	 */
+	public JSONObject depthRequest(String currency) throws ClientProtocolException, IOException{
+		return publicInfoRequest(currency, "depth",2);
+		
+	}
+	
+	/**
+	 *  Convince Method to do a public info request (API 3)
+	 * 
+	 * @return Json Object of the response
+	 * @throws ClientProtocolException
+	 * @throws IOException
+	 */
+	public JSONObject info3Request() throws ClientProtocolException, IOException{
+
+		return publicInfoRequest(" ","info",3);
+		
+	}
+	
+	
+	
+	/**
+	 * 
+	 * Convince Method to do a public ticker request (API 3)
+	 * 
+	 * @param currency a String array of currencies to display
+	 * @return Json Object of the response
+	 * @throws ClientProtocolException
+	 * @throws IOException
+	 */
+	public JSONObject ticker3Request(String[] currency) throws ClientProtocolException, IOException{
+		String params = null;
+		if (currency.length>1){
+			for(String x:currency){
+				if (params.length()>0){
+					params += "-";
+				}
+				params += x;
+			}
+		}
+		return publicInfoRequest(params,"ticker",3);
+		
+	}
+	/**
+	 * 
+	 * Convince Method to do a public depth request (API 3)
+	 * 
+	 * @param currency a String array of currencies to display
+	 * @return Json Object of the response
+	 * @throws ClientProtocolException
+	 * @throws IOException
+	 */
+	public JSONObject depth3Request(String[] currency) throws ClientProtocolException, IOException{
+		String params = null;
+		if (currency.length>1){
+			for(String x:currency){
+				if (params.length()>0){
+					params += "-";
+				}
+				params += x;
+			}
+		}
+		return publicInfoRequest(params,"depth",3);
+		
+	}
+	
+	
+	/**
+	 * 
+	 * Convince Method to do a public trades request (API 3)
+	 * 
+	 * @param currency a String array of currencies to display
+	 * @param limit the limit of entries per currency 0 for default(150) must be less than 2000
+	 * @return Json Object of the response
+	 * @throws ClientProtocolException
+	 * @throws IOException
+	 */
+	public JSONObject trades3Request(String[] currency, int limit) throws ClientProtocolException, IOException{
+		String params = null;
+		if (currency.length>1){
+			for(String x:currency){
+				if (params.length()>0){
+					params += "-";
+				}
+				params += x;
+			}
+		}
+		params += "?limit="+limit;
+		return publicInfoRequest(params,"trades",3);
+		
+	}
+}	
